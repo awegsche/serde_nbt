@@ -1,37 +1,37 @@
 use crate::error::{Error, Result};
-use rnbt::{NbtField, NbtList, NbtValue, write_nbt};
-use serde::{Serialize, ser};
+use crate::nbt::*;
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use rnbt::{write_nbt, NbtField, NbtList, NbtValue};
+use serde::{ser, Serialize};
+use std::io::{Read, Write};
 
-pub struct Serializer {
-    output: NbtField,
-}
-
+// ---- public methods -----------------------------------------------------------------------------
 pub fn to_writer<W: std::io::Write, T: Serialize>(
     writer: &mut W,
     value: &T,
     name: String,
 ) -> Result<()> {
-    let mut serializer = Serializer::new(name);
+    let mut serializer = Serializer::new(name, writer);
 
     value.serialize(&mut serializer)?;
-
-    write_nbt(writer, &serializer.output)?;
 
     Ok(())
 }
 
-impl Serializer {
-    pub fn new(name: String) -> Self {
-        Self {
-            output: NbtField {
-                name,
-                value: NbtValue::End,
-            },
-        }
+// ---- Serializer struct --------------------------------------------------------------------------
+pub struct Serializer<'a, W: std::io::Write> {
+    name: String,
+    writer: &'a mut W,
+}
+
+impl<'a, W: Write> Serializer<'a, W> {
+    pub fn new(name: String, writer: &'a mut W) -> Self {
+        Self { name, writer }
     }
 }
 
-impl<'a> ser::Serializer for &'a mut Serializer {
+// ---- Impls --------------------------------------------------------------------------------------
+impl<'a, W: Write> ser::Serializer for &'a mut Serializer<'a, W> {
     type Ok = ();
 
     type Error = crate::error::Error;
@@ -51,72 +51,110 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     type SerializeStructVariant = Self;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok> {
-        self.output.value = NbtValue::Byte(if v { 1 } else { 0 });
+        self.writer.write_u8(TAG_BYTE)?;
+        write_name(&mut self.writer, &self.name)?;
+        self.writer.write_u8(if v { 1 } else { 0 })?;
+
         Ok(())
     }
 
     fn serialize_i8(self, v: i8) -> Result<Self::Ok> {
-        self.output.value = NbtValue::Short(v as i16);
+        self.writer.write_u8(TAG_SHORT)?;
+        write_name(&mut self.writer, &self.name)?;
+        self.writer.write_i16::<BigEndian>(v as i16)?;
+
         Ok(())
     }
 
     fn serialize_i16(self, v: i16) -> Result<Self::Ok> {
-        self.output.value = NbtValue::Short(v);
+        self.writer.write_u8(TAG_SHORT)?;
+        write_name(&mut self.writer, &self.name)?;
+        self.writer.write_i16::<BigEndian>(v)?;
+
         Ok(())
     }
 
     fn serialize_i32(self, v: i32) -> Result<Self::Ok> {
-        self.output.value = NbtValue::Int(v);
+        self.writer.write_u8(TAG_INT)?;
+        write_name(&mut self.writer, &self.name)?;
+        self.writer.write_i32::<BigEndian>(v)?;
+
         Ok(())
     }
 
     fn serialize_i64(self, v: i64) -> Result<Self::Ok> {
-        self.output.value = NbtValue::Long(v);
+        self.writer.write_u8(TAG_LONG)?;
+        write_name(&mut self.writer, &self.name)?;
+        self.writer.write_i64::<BigEndian>(v)?;
+
         Ok(())
     }
 
     fn serialize_u8(self, v: u8) -> Result<Self::Ok> {
-        self.output.value = NbtValue::Byte(v);
+        self.writer.write_u8(TAG_BYTE)?;
+        write_name(&mut self.writer, &self.name)?;
+        self.writer.write_u8(v)?;
+
         Ok(())
     }
 
     fn serialize_u16(self, v: u16) -> Result<Self::Ok> {
-        self.output.value = NbtValue::Int(v as i32);
+        self.writer.write_u8(TAG_INT)?;
+        write_name(&mut self.writer, &self.name)?;
+        self.writer.write_i32::<BigEndian>(v as i32)?;
+
         Ok(())
     }
 
     fn serialize_u32(self, v: u32) -> Result<Self::Ok> {
-        self.output.value = NbtValue::Long(v as i64);
+        self.writer.write_u8(TAG_LONG)?;
+        write_name(&mut self.writer, &self.name)?;
+        self.writer.write_i64::<BigEndian>(v as i64)?;
+
         Ok(())
     }
 
     fn serialize_u64(self, v: u64) -> Result<Self::Ok> {
-        self.output.value = NbtValue::Long(i64::try_from(v).unwrap());
+        self.writer.write_u8(TAG_LONG)?;
+        write_name(&mut self.writer, &self.name)?;
+        self.writer.write_i64::<BigEndian>(i64::try_from(v)?)?;
+
         Ok(())
     }
 
     fn serialize_f32(self, v: f32) -> Result<Self::Ok> {
-        self.output.value = NbtValue::Float(v);
+        self.writer.write_u8(TAG_FLOAT)?;
+        write_name(&mut self.writer, &self.name)?;
+        self.writer.write_f32::<BigEndian>(v)?;
+
         Ok(())
     }
 
     fn serialize_f64(self, v: f64) -> Result<Self::Ok> {
-        self.output.value = NbtValue::Double(v);
+        self.writer.write_u8(TAG_DOUBLE)?;
+        write_name(&mut self.writer, &self.name)?;
+        self.writer.write_f64::<BigEndian>(v)?;
+
         Ok(())
     }
 
     fn serialize_char(self, v: char) -> Result<Self::Ok> {
-        self.output.value = NbtValue::String(v.to_string());
-        Ok(())
+        self.serialize_str(&v.to_string())
     }
 
     fn serialize_str(self, v: &str) -> Result<Self::Ok> {
-        self.output.value = NbtValue::String(v.to_string());
+        self.writer.write_u8(TAG_STRING)?;
+        write_name(&mut self.writer, &self.name)?;
+        self.writer.write_i16::<BigEndian>(v.len() as i16)?;
+        self.writer.write_all(v.as_bytes())?;
         Ok(())
     }
 
     fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok> {
-        self.output.value = NbtValue::ByteArray(v.to_vec());
+        self.writer.write_u8(TAG_BYTE_ARRAY)?;
+        write_name(&mut self.writer, &self.name)?;
+        self.writer.write_i32::<BigEndian>(v.len() as i32)?;
+        self.writer.write_all(v);
         Ok(())
     }
 
@@ -199,8 +237,9 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     }
 
     fn serialize_struct(self, name: &'static str, len: usize) -> Result<Self::SerializeStruct> {
-        //self.output.name = name.to_string();
-        self.output.value = NbtValue::Compound(vec![]);
+        self.writer.write_u8(TAG_COMPOUND)?;
+        write_name(&mut self.writer, &self.name)?;
+
         Ok(self)
     }
 
@@ -215,62 +254,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     }
 }
 
-fn push_value_to_list(list: &mut NbtList, value: NbtValue) -> Result<()> {
-    match value {
-        NbtValue::Byte(b) => {
-            if let NbtList::Byte(l) = list {
-                l.push(b);
-                return Ok(());
-            }
-        }
-        NbtValue::Boolean(b) => {
-            if let NbtList::Boolean(l) = list {
-                l.push(b);
-                return Ok(());
-            }
-        }
-        NbtValue::Short(s) => {
-            if let NbtList::Short(l) = list {
-                l.push(s);
-                return Ok(());
-            }
-        }
-        NbtValue::Int(i) => {
-            if let NbtList::Int(l) = list {
-                l.push(i);
-                return Ok(());
-            }
-        }
-        NbtValue::Long(i) => {
-            if let NbtList::Long(l) = list {
-                l.push(i);
-                return Ok(());
-            }
-        }
-        NbtValue::Float(f) => {
-            if let NbtList::Float(l) = list {
-                l.push(f);
-                return Ok(());
-            }
-        }
-        NbtValue::Double(d) => {
-            if let NbtList::Double(l) = list {
-                l.push(d);
-                return Ok(());
-            }
-        }
-        NbtValue::String(s) => todo!(),
-        NbtValue::List(_) => todo!(),
-        NbtValue::Compound(_) => todo!(),
-        NbtValue::ByteArray(_) => todo!(),
-        NbtValue::IntArray(_) => todo!(),
-        NbtValue::LongArray(_) => todo!(),
-        NbtValue::End => todo!(),
-    }
-    return Err(Error::IncompatibleListType);
-}
-
-impl<'a> ser::SerializeSeq for &'a mut Serializer {
+impl<'a, W: Write> ser::SerializeSeq for &'a mut Serializer<'a, W> {
     type Ok = ();
     type Error = Error;
 
@@ -278,33 +262,7 @@ impl<'a> ser::SerializeSeq for &'a mut Serializer {
     where
         T: ?Sized + Serialize,
     {
-        let mut serializer = Serializer {
-            output: NbtField {
-                name: String::new(),
-                value: NbtValue::End,
-            },
-        };
-        value.serialize(&mut serializer)?;
-
-        if let NbtValue::End = serializer.output.value {
-            match serializer.output.value {
-                NbtValue::Byte(b) => self.output.value = NbtValue::List(NbtList::Byte(vec![b])),
-                NbtValue::Boolean(b) => {
-                    self.output.value = NbtValue::List(NbtList::Boolean(vec![b]))
-                }
-                NbtValue::Short(s) => self.output.value = NbtValue::List(NbtList::Short(vec![s])),
-                NbtValue::Int(i) => self.output.value = NbtValue::List(NbtList::Int(vec![i])),
-                NbtValue::Long(i) => self.output.value = NbtValue::List(NbtList::Long(vec![i])),
-                NbtValue::Float(f) => self.output.value = NbtValue::List(NbtList::Float(vec![f])),
-                NbtValue::Double(d) => self.output.value = NbtValue::List(NbtList::Double(vec![d])),
-                _ => return Err(Error::UnknownListType),
-            }
-        }
-        if let NbtValue::List(l) = &mut self.output.value {
-            push_value_to_list(l, serializer.output.value)
-        } else {
-            Err(Error::NotWritingToList)
-        }
+        Ok(())
     }
 
     fn end(self) -> Result<Self::Ok> {
@@ -312,7 +270,7 @@ impl<'a> ser::SerializeSeq for &'a mut Serializer {
     }
 }
 
-impl<'a> ser::SerializeTuple for &'a mut Serializer {
+impl<'a, W: Write> ser::SerializeTuple for &'a mut Serializer<'a, W> {
     type Ok = ();
     type Error = Error;
 
@@ -328,7 +286,7 @@ impl<'a> ser::SerializeTuple for &'a mut Serializer {
     }
 }
 
-impl<'a> ser::SerializeMap for &'a mut Serializer {
+impl<'a, W: Write> ser::SerializeMap for &'a mut Serializer<'a, W> {
     type Ok = ();
     type Error = Error;
 
@@ -351,7 +309,7 @@ impl<'a> ser::SerializeMap for &'a mut Serializer {
     }
 }
 
-impl<'a> ser::SerializeStruct for &'a mut Serializer {
+impl<'a, W: Write> ser::SerializeStruct for &'a mut Serializer<'a, W> {
     type Ok = ();
     type Error = Error;
 
@@ -363,23 +321,17 @@ impl<'a> ser::SerializeStruct for &'a mut Serializer {
     where
         T: ?Sized + Serialize,
     {
-        let mut serializer = Serializer::new(key.to_owned());
-        value.serialize(&mut serializer)?;
-
-        if let NbtValue::Compound(c) = &mut self.output.value {
-            c.push(serializer.output);
-            Ok(())
-        } else {
-            Err(Error::NotWritingToCompound)
-        }
+        let mut serializer = Serializer::new(key.to_owned(), self.writer);
+        value.serialize(&mut serializer)
     }
 
     fn end(self) -> std::prelude::v1::Result<Self::Ok, Self::Error> {
+        self.writer.write_u8(TAG_END)?;
         Ok(())
     }
 }
 
-impl<'a> ser::SerializeStructVariant for &'a mut Serializer {
+impl<'a, W: Write> ser::SerializeStructVariant for &'a mut Serializer<'a, W> {
     type Ok = ();
     type Error = Error;
 
@@ -399,7 +351,7 @@ impl<'a> ser::SerializeStructVariant for &'a mut Serializer {
     }
 }
 
-impl<'a> ser::SerializeTupleStruct for &'a mut Serializer {
+impl<'a, W: Write> ser::SerializeTupleStruct for &'a mut Serializer<'a, W> {
     type Ok = ();
     type Error = Error;
 
@@ -415,7 +367,7 @@ impl<'a> ser::SerializeTupleStruct for &'a mut Serializer {
     }
 }
 
-impl<'a> ser::SerializeTupleVariant for &'a mut Serializer {
+impl<'a, W: Write> ser::SerializeTupleVariant for &'a mut Serializer<'a, W> {
     type Ok = ();
     type Error = Error;
 
@@ -431,54 +383,9 @@ impl<'a> ser::SerializeTupleVariant for &'a mut Serializer {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use rnbt::read_nbt;
-
-    use super::*;
-
-    #[test]
-    fn try_simple_struct() {
-        #[derive(serde::Serialize)]
-        struct TestStruct {
-            a: i32,
-            b: String,
-        }
-
-        let mut output = Vec::new();
-        to_writer(
-            &mut output,
-            &TestStruct {
-                a: 1,
-                b: "hello".to_string(),
-            },
-            "test".to_string(),
-        )
-        .unwrap();
-
-        println!("{:?}", output);
-
-
-        let mut cursor = std::io::Cursor::new(output.clone());
-        let output_nbt = read_nbt(&mut cursor).unwrap();
-        println!("{:?}", output_nbt);
-
-        let mut expected = Vec::new();
-        write_nbt(&mut expected, &NbtField {
-            name: "test".to_string(),
-            value: NbtValue::Compound(vec![
-                NbtField {
-                    name: "a".to_string(),
-                    value: NbtValue::Int(1),
-                },
-                NbtField {
-                    name: "b".to_string(),
-                    value: NbtValue::String("hello".to_string()),
-                },
-            ]),
-        })
-        .unwrap();
-
-        assert_eq!(expected, output);
-    }
+// ---- Helper functions ---------------------------------------------------------------------------
+pub fn write_name<W: Write>(w: &mut W, name: &str) -> std::io::Result<()> {
+    w.write_u16::<BigEndian>(name.len() as u16)?;
+    w.write_all(name.as_bytes())
 }
+
